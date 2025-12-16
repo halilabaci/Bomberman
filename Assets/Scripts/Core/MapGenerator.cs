@@ -12,14 +12,19 @@ public class MapGenerator : MonoBehaviour
     public TileBase groundTile;
     public TileBase solidTile;
     public TileBase breakableTile;
+    public TileBase hardTile;
 
     [Header("Unity Baðlantýlarý")]
     public Tilemap groundTilemap;
     public Tilemap solidTilemap;
     public Tilemap breakableTilemap;
+    public Tilemap hardTilemap;
 
     [Range(0, 1)]
     public float breakableDensity = 0.5f;
+
+    [Range(0, 1)]
+    public float hardDensity = 0.15f; // breakable içinde hard oraný
 
     void Start()
     {
@@ -82,7 +87,13 @@ public class MapGenerator : MonoBehaviour
                         continue;
 
                     if (rng.NextDouble() < breakableDensity)
-                        breakableTilemap.SetTile(pos, breakableTile);
+                    {
+                        if (hardTilemap != null && hardTile != null && rng.NextDouble() < hardDensity)
+                            hardTilemap.SetTile(pos, hardTile);
+                        else
+                            breakableTilemap.SetTile(pos, breakableTile);
+                    }
+
                 }
             }
         }
