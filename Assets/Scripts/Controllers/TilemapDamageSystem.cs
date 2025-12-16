@@ -26,9 +26,10 @@ namespace DPBomberman.Controllers
         private readonly Dictionary<Vector3Int, int> hardHp = new();
 
         private void Awake()
-        {   
+        {
             if (factory == null)
                 factory = new TileWallFactory(solidTilemap, breakableTilemap, hardTilemap);
+        }
 
 
         public void Explode(Vector3Int origin, int range, MapLogicAdapter logicAdapter)

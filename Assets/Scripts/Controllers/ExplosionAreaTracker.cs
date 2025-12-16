@@ -50,4 +50,5 @@ namespace DPBomberman.Controllers
                     activeCounts[c] = count;
             }
         }
+    }
 }
