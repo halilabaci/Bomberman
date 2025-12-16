@@ -9,7 +9,7 @@ namespace DPBomberman.Patterns.State
 
         public PausedState(GameManager game, GameStateMachine machine)
         {   
-            this.game = machine;
+            this.game = game;
             this.machine = machine;
         }
 
