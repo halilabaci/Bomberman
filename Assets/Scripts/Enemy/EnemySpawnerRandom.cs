@@ -1,6 +1,12 @@
 ﻿using System.Collections;
 using UnityEngine;
 using UnityEngine.Tilemaps;
+using DPBomberman.Controllers;
+using DPBomberman.Patterns.Strategy;
+
+
+// EnemyController başka bir namespace'teyse burayı ona göre düzeltiriz.
+// Şimdilik gerek yok; GetComponent ile alıyoruz.
 
 public class EnemySpawnerRandom : MonoBehaviour
 {
@@ -21,6 +27,9 @@ public class EnemySpawnerRandom : MonoBehaviour
     [Header("Player")]
     public Transform player;
     public int minManhattanDistanceFromPlayer = 4;
+
+    [Header("AI (Strategy)")]
+    public EnemyStrategyType spawnStrategy = EnemyStrategyType.Random; // ✅ sadece seçim
 
     private IEnumerator Start()
     {
@@ -100,7 +109,19 @@ public class EnemySpawnerRandom : MonoBehaviour
             }
 
             Vector3 pos = ground.GetCellCenterWorld(cell);
-            Instantiate(enemyPrefab, pos, Quaternion.identity);
+
+            // ✅ Mantığı bozmadan: instantiate sonrası strategy set
+            GameObject go = Instantiate(enemyPrefab, pos, Quaternion.identity);
+            var ctrl = go.GetComponent<EnemyController>();
+            if (ctrl != null)
+            {
+                ctrl.SetStrategy(spawnStrategy);
+            }
+            else
+            {
+                Debug.LogWarning("[EnemySpawnerRandom] Spawned enemy has no EnemyController component!");
+            }
+
             return true;
         }
 

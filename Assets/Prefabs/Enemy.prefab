@@ -116,6 +116,8 @@ MonoBehaviour:
   hardTilemap: {fileID: 0}
   stepDuration: 0.14
   moveInterval: 0.1
+  strategyType: 1
+  player: {fileID: 0}
   explosionTracker: {fileID: 0}
   actor: {fileID: 0}
 --- !u!1 &6032216262787457458
@@ -195,7 +197,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 1540242517
-  m_SortingLayer: 3
+  m_SortingLayer: 4
   m_SortingOrder: 20
   m_Sprite: {fileID: -9078394528372511491, guid: 131fd62ecd3e3d24699ac2e4e38ee3b7, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}

@@ -1,9 +1,12 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Tilemaps;
+using DPBomberman.Controllers;
 
-namespace DPBomberman.Controllers
+
+namespace DPBomberman.Patterns.Strategy
 {
+    
     public class EnemyController : MonoBehaviour
     {
         [Header("Grid Movement")]
@@ -15,10 +18,18 @@ namespace DPBomberman.Controllers
         [Tooltip("Bir hücreden diðerine geçiþ süresi")]
         public float stepDuration = 0.14f;
 
-        [Header("AI")]
+        [Header("AI Timing")]
         [Tooltip("Her adým arasýnda bekleme (çok hýzlý karar deðiþtirmesin)")]
         public float moveInterval = 0.10f;
         private float nextMoveTime = 0f;
+
+        [Header("AI Strategy")]
+        public EnemyStrategyType strategyType = EnemyStrategyType.Random;
+
+        [Tooltip("Player referansý (boþsa tag=Player ile bulmayý dener)")]
+        public Transform player;
+
+        private IEnemyMovementStrategy strategy;
 
         [Header("Death")]
         public ExplosionAreaTracker explosionTracker;
@@ -39,6 +50,15 @@ namespace DPBomberman.Controllers
             hardTilemap = hard;
         }
 
+        /// <summary>
+        /// Spawner'dan/Inspector'dan strategy setlemek için
+        /// </summary>
+        public void SetStrategy(EnemyStrategyType type)
+        {
+            strategyType = type;
+            strategy = CreateStrategy(strategyType);
+        }
+
         private void Start()
         {
             // Actor / tracker auto-wire (varsa)
@@ -47,6 +67,13 @@ namespace DPBomberman.Controllers
 
             if (explosionTracker == null)
                 explosionTracker = FindFirstObjectByType<ExplosionAreaTracker>();
+
+            // Player auto-wire
+            if (player == null)
+            {
+                var p = GameObject.FindGameObjectWithTag("Player");
+                if (p != null) player = p.transform;
+            }
 
             // Eðer spawner inject etmediyse, sahneden isimle bulmayý dene (opsiyonel güvenlik aðý)
             EnsureTilemapsBound();
@@ -58,13 +85,16 @@ namespace DPBomberman.Controllers
                 return;
             }
 
+            // Strategy oluþtur
+            strategy = CreateStrategy(strategyType);
+
             currentCell = groundTilemap.WorldToCell(transform.position);
             SnapToCell(currentCell);
 
             // Spawn duvarýn üstündeyse yakýndaki boþ hücreye kaydýr
             TryRelocateIfBlocked();
 
-            Debug.Log($"[EnemyController] Using groundTilemap: {groundTilemap.name}, startCell={currentCell}");
+            Debug.Log($"[EnemyController] Using groundTilemap: {groundTilemap.name}, startCell={currentCell}, strategy={strategyType}");
         }
 
         private void Update()
@@ -77,7 +107,6 @@ namespace DPBomberman.Controllers
             // Patlama alanýnda mý?
             if (explosionTracker != null && explosionTracker.IsCellDangerous(currentCell))
             {
-                // actor yoksa bile patlamada NRE yemesin
                 if (actor != null) actor.Kill();
                 return;
             }
@@ -88,10 +117,11 @@ namespace DPBomberman.Controllers
             if (Time.time < nextMoveTime) return;
             nextMoveTime = Time.time + moveInterval;
 
-            Vector3Int dir = PickRandomDirection();
+            // ---- STRATEGY'DEN YÖN AL ----
+            Vector3Int dir = PickDirectionFromStrategy();
             Vector3Int target = currentCell + dir;
 
-            // blokluysa birkaç deneme yap
+            // blokluysa birkaç deneme yap (mantýk ayný)
             int attempts = 0;
             while (IsBlocked(target) && attempts < 8)
             {
@@ -104,6 +134,38 @@ namespace DPBomberman.Controllers
                 return;
 
             StartCoroutine(MoveCellTo(target));
+        }
+
+        private Vector3Int PickDirectionFromStrategy()
+        {
+            // Strategy çalýþmazsa fallback random (oyun patlamasýn)
+            if (strategy == null || player == null)
+                return PickRandomDirection();
+
+            var ctx = new EnemyContext(
+                transform.position,
+                player.position,
+                transform.up,
+                Time.deltaTime
+            );
+
+            Vector2Int move = strategy.GetNextMove(ctx);
+
+            // Strategy (0,0) dönerse fallback
+            if (move == Vector2Int.zero)
+                return PickRandomDirection();
+
+            return new Vector3Int(move.x, move.y, 0);
+        }
+
+        private IEnemyMovementStrategy CreateStrategy(EnemyStrategyType type)
+        {
+            return type switch
+            {
+                EnemyStrategyType.Random => new RandomMoveStrategy(),
+                EnemyStrategyType.ChasePlayer => new ChasePlayerStrategy(),
+                _ => new RandomMoveStrategy()
+            };
         }
 
         private void EnsureTilemapsBound()
