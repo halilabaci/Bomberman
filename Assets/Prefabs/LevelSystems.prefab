@@ -153,6 +153,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PowerUpPickup
   type: 0
   intBonus: 1
+  pickupKey: 101
 --- !u!50 &228315785551735503
 Rigidbody2D:
   serializedVersion: 5
@@ -257,6 +258,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2614069669627437037}
+  - component: {fileID: 5380901279278167691}
   m_Layer: 0
   m_Name: LevelSystems
   m_TagString: Untagged
@@ -286,6 +288,21 @@ Transform:
   - {fileID: 614352749859122394}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5380901279278167691
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384038786052287243}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bfd05843c2989b44aa1a8a652a251d8b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GameManager
+  mapGenerator: {fileID: 0}
+  mapLogicAdapter: {fileID: 0}
+  inputHandler: {fileID: 0}
 --- !u!1 &3935228296469138139
 GameObject:
   m_ObjectHideFlags: 0
@@ -335,10 +352,12 @@ MonoBehaviour:
   wallsSolid: {fileID: 0}
   wallsBreakable: {fileID: 0}
   wallsHard: {fileID: 0}
+  decorations: {fileID: 0}
   enemyCount: 2
   maxAttemptsPerEnemy: 300
   player: {fileID: 0}
   minManhattanDistanceFromPlayer: 4
+  spawnStrategy: 0
 --- !u!1 &4467792330276244849
 GameObject:
   m_ObjectHideFlags: 0
@@ -492,6 +511,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PowerUpPickup
   type: 1
   intBonus: 1
+  pickupKey: 101
 --- !u!50 &4723969180572233489
 Rigidbody2D:
   serializedVersion: 5
@@ -717,6 +737,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PowerUpPickup
   type: 2
   intBonus: 3
+  pickupKey: 101
 --- !u!50 &7888359501184972288
 Rigidbody2D:
   serializedVersion: 5
@@ -841,8 +862,8 @@ MonoBehaviour:
   explosionTracker: {fileID: 6911654856905014208}
   breakableDropChance: 0.248
   hardDropChance: 0.453
-  bombCountPowerUpPrefab: {fileID: 6783314636916755104}
   bombPowerPowerUpPrefab: {fileID: 4467792330276244849}
+  bombCountPowerUpPrefab: {fileID: 6783314636916755104}
   speedPowerUpPrefab: {fileID: 537367665541018845}
 --- !u!114 &6911654856905014208
 MonoBehaviour:
@@ -878,7 +899,7 @@ MonoBehaviour:
   damageSystem: {fileID: 1153692703192832331}
   mapLogicAdapter: {fileID: 3528786078738316039}
   fuseSeconds: 2
-  range: 2
+  defaultRange: 1
 --- !u!212 &533335693904564715
 SpriteRenderer:
   m_ObjectHideFlags: 0

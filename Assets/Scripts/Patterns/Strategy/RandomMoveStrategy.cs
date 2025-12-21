@@ -6,9 +6,7 @@ namespace DPBomberman.Patterns.Strategy
     {
         public Vector2Int GetNextMove(EnemyContext context)
         {
-            // 0-3 arasý rastgele sayý: Yukarý, Aþaðý, Sol, Sað
             int rand = Random.Range(0, 4);
-
             return rand switch
             {
                 0 => Vector2Int.up,

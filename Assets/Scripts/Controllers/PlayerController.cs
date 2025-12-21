@@ -52,24 +52,21 @@ namespace DPBomberman.Controllers
 
         private void Update()
         {
+            // Input YOK: sadece ölüm/danger kontrolü var
             if (actor != null && actor.IsDead) return;
 
-            // ölüm kontrolü
             if (explosionTracker != null && explosionTracker.IsCellDangerous(currentCell))
             {
                 actor?.Kill();
                 return;
             }
+        }
 
-            // bomba: sadece buradan
-            if (Input.GetKeyDown(KeyCode.Space))
-            {
-                bombSystem?.TryPlaceBomb();
-            }
-
+        // ✅ Command'lerin çağıracağı giriş noktası
+        public void TryMove(Vector3Int dir)
+        {
+            if (actor != null && actor.IsDead) return;
             if (isMoving) return;
-
-            Vector3Int dir = ReadDirection();
             if (dir == Vector3Int.zero) return;
 
             Vector3Int targetCell = currentCell + dir;
@@ -78,21 +75,17 @@ namespace DPBomberman.Controllers
             StartCoroutine(MoveCellTo(targetCell));
         }
 
-        private Vector3Int ReadDirection()
+        // ✅ Command'lerin çağıracağı giriş noktası
+        public void TryPlaceBomb()
         {
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A))
-                return new Vector3Int(-1, 0, 0);
+            if (actor != null && actor.IsDead) return;
+            bombSystem?.TryPlaceBomb();
+        }
 
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D))
-                return new Vector3Int(1, 0, 0);
-
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W))
-                return new Vector3Int(0, 1, 0);
-
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S))
-                return new Vector3Int(0, -1, 0);
-
-            return Vector3Int.zero;
+        // ✅ InputHandler için basit kontrol
+        public bool IsDead()
+        {
+            return actor != null && actor.IsDead;
         }
 
         private bool IsBlocked(Vector3Int cell)

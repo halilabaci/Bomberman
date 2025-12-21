@@ -1,12 +1,10 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Tilemaps;
-using DPBomberman.Controllers;
+// Kendi klasöründe olduðu için "using DPBomberman.Patterns.Strategy;" GEREKMEZ.
 
-
-namespace DPBomberman.Patterns.Strategy
+namespace DPBomberman.Patterns.Strategy // <-- ARTIK BURASI DA STRATEGY OLDU
 {
-    
     public class EnemyController : MonoBehaviour
     {
         [Header("Grid Movement")]
@@ -19,29 +17,23 @@ namespace DPBomberman.Patterns.Strategy
         public float stepDuration = 0.14f;
 
         [Header("AI Timing")]
-        [Tooltip("Her adým arasýnda bekleme (çok hýzlý karar deðiþtirmesin)")]
         public float moveInterval = 0.10f;
         private float nextMoveTime = 0f;
 
         [Header("AI Strategy")]
-        public EnemyStrategyType strategyType = EnemyStrategyType.Random;
+        public EnemyStrategyType strategyType = EnemyStrategyType.Random; // <-- ARTIK HATA VERMEZ
 
-        [Tooltip("Player referansý (boþsa tag=Player ile bulmayý dener)")]
         public Transform player;
-
-        private IEnemyMovementStrategy strategy;
+        private IEnemyMovementStrategy strategy; // <-- ARTIK HATA VERMEZ
 
         [Header("Death")]
-        public ExplosionAreaTracker explosionTracker;
-        public DamageableActor actor;
+        // Bu sýnýflar baþka yerdeyse hata verebilir, aþaðýda açýklamasýný yaptým*
+        public DPBomberman.Controllers.ExplosionAreaTracker explosionTracker;
+        public DPBomberman.Controllers.DamageableActor actor;
 
         private bool isMoving;
         private Vector3Int currentCell;
 
-        /// <summary>
-        /// Spawner tarafýndan sahnedeki tilemap referanslarý enjekte edilir.
-        /// (City/Desert/Forest fark etmeksizin NULL sorununu çözer.)
-        /// </summary>
         public void InjectTilemaps(Tilemap ground, Tilemap solid, Tilemap breakable, Tilemap hard)
         {
             groundTilemap = ground;
@@ -50,9 +42,6 @@ namespace DPBomberman.Patterns.Strategy
             hardTilemap = hard;
         }
 
-        /// <summary>
-        /// Spawner'dan/Inspector'dan strategy setlemek için
-        /// </summary>
         public void SetStrategy(EnemyStrategyType type)
         {
             strategyType = type;
@@ -61,50 +50,33 @@ namespace DPBomberman.Patterns.Strategy
 
         private void Start()
         {
-            // Actor / tracker auto-wire (varsa)
-            if (actor == null)
-                actor = GetComponent<DamageableActor>();
+            if (actor == null) actor = GetComponent<DPBomberman.Controllers.DamageableActor>();
+            if (explosionTracker == null) explosionTracker = FindFirstObjectByType<DPBomberman.Controllers.ExplosionAreaTracker>();
 
-            if (explosionTracker == null)
-                explosionTracker = FindFirstObjectByType<ExplosionAreaTracker>();
-
-            // Player auto-wire
             if (player == null)
             {
                 var p = GameObject.FindGameObjectWithTag("Player");
                 if (p != null) player = p.transform;
             }
 
-            // Eðer spawner inject etmediyse, sahneden isimle bulmayý dene (opsiyonel güvenlik aðý)
             EnsureTilemapsBound();
-
             if (groundTilemap == null)
             {
-                Debug.LogError("[EnemyController] groundTilemap is NULL. (Spawner InjectTilemaps çaðýrmýyor olabilir)");
                 enabled = false;
                 return;
             }
 
-            // Strategy oluþtur
             strategy = CreateStrategy(strategyType);
-
             currentCell = groundTilemap.WorldToCell(transform.position);
             SnapToCell(currentCell);
-
-            // Spawn duvarýn üstündeyse yakýndaki boþ hücreye kaydýr
             TryRelocateIfBlocked();
-
-            Debug.Log($"[EnemyController] Using groundTilemap: {groundTilemap.name}, startCell={currentCell}, strategy={strategyType}");
         }
 
         private void Update()
         {
-            if (!enabled) return;
-            if (groundTilemap == null) return;
-
+            if (!enabled || groundTilemap == null) return;
             if (actor != null && actor.IsDead) return;
 
-            // Patlama alanýnda mý?
             if (explosionTracker != null && explosionTracker.IsCellDangerous(currentCell))
             {
                 if (actor != null) actor.Kill();
@@ -112,35 +84,28 @@ namespace DPBomberman.Patterns.Strategy
             }
 
             if (isMoving) return;
-
-            // Çok sýk yön deðiþtirmesin
             if (Time.time < nextMoveTime) return;
             nextMoveTime = Time.time + moveInterval;
 
-            // ---- STRATEGY'DEN YÖN AL ----
             Vector3Int dir = PickDirectionFromStrategy();
             Vector3Int target = currentCell + dir;
 
-            // blokluysa birkaç deneme yap (mantýk ayný)
             int attempts = 0;
             while (IsBlocked(target) && attempts < 8)
             {
-                dir = PickRandomDirection();
+                dir = PickDirectionFromStrategy();
                 target = currentCell + dir;
                 attempts++;
             }
 
-            if (IsBlocked(target))
-                return;
+            if (IsBlocked(target)) return;
 
             StartCoroutine(MoveCellTo(target));
         }
 
         private Vector3Int PickDirectionFromStrategy()
         {
-            // Strategy çalýþmazsa fallback random (oyun patlamasýn)
-            if (strategy == null || player == null)
-                return PickRandomDirection();
+            if (strategy == null || player == null) return PickRandomDirection();
 
             var ctx = new EnemyContext(
                 transform.position,
@@ -150,10 +115,7 @@ namespace DPBomberman.Patterns.Strategy
             );
 
             Vector2Int move = strategy.GetNextMove(ctx);
-
-            // Strategy (0,0) dönerse fallback
-            if (move == Vector2Int.zero)
-                return PickRandomDirection();
+            if (move == Vector2Int.zero) return PickRandomDirection();
 
             return new Vector3Int(move.x, move.y, 0);
         }
@@ -170,19 +132,10 @@ namespace DPBomberman.Patterns.Strategy
 
         private void EnsureTilemapsBound()
         {
-            // Buradaki isimler sahnedeki GameObject isimleriyle ayný olmalý:
-            // Ground, Walls_Solid, Walls_Breakable, Walls_Hard
-            if (groundTilemap == null)
-                groundTilemap = GameObject.Find("Ground")?.GetComponent<Tilemap>();
-
-            if (solidTilemap == null)
-                solidTilemap = GameObject.Find("Walls_Solid")?.GetComponent<Tilemap>();
-
-            if (breakableTilemap == null)
-                breakableTilemap = GameObject.Find("Walls_Breakable")?.GetComponent<Tilemap>();
-
-            if (hardTilemap == null)
-                hardTilemap = GameObject.Find("Walls_Hard")?.GetComponent<Tilemap>();
+            if (groundTilemap == null) groundTilemap = GameObject.Find("Ground")?.GetComponent<Tilemap>();
+            if (solidTilemap == null) solidTilemap = GameObject.Find("Walls_Solid")?.GetComponent<Tilemap>();
+            if (breakableTilemap == null) breakableTilemap = GameObject.Find("Walls_Breakable")?.GetComponent<Tilemap>();
+            if (hardTilemap == null) hardTilemap = GameObject.Find("Walls_Hard")?.GetComponent<Tilemap>();
         }
 
         private Vector3Int PickRandomDirection()
@@ -200,54 +153,35 @@ namespace DPBomberman.Patterns.Strategy
         private bool IsBlocked(Vector3Int cell)
         {
             if (groundTilemap == null) return true;
-
             if (solidTilemap != null && solidTilemap.HasTile(cell)) return true;
             if (breakableTilemap != null && breakableTilemap.HasTile(cell)) return true;
             if (hardTilemap != null && hardTilemap.HasTile(cell)) return true;
-
-            // ground yoksa harita dýþý
             if (!groundTilemap.HasTile(cell)) return true;
-
             return false;
         }
 
         private bool TryRelocateIfBlocked()
         {
-            if (!IsBlocked(currentCell))
-                return true;
-
-            Vector3Int[] neighbors =
-            {
-                currentCell + Vector3Int.right,
-                currentCell + Vector3Int.left,
-                currentCell + Vector3Int.up,
-                currentCell + Vector3Int.down
-            };
-
+            if (!IsBlocked(currentCell)) return true;
+            Vector3Int[] neighbors = { currentCell + Vector3Int.right, currentCell + Vector3Int.left, currentCell + Vector3Int.up, currentCell + Vector3Int.down };
             foreach (var n in neighbors)
             {
                 if (!IsBlocked(n))
                 {
                     currentCell = n;
                     SnapToCell(currentCell);
-                    Debug.Log($"[EnemyController] Spawn was blocked, relocated to {currentCell}");
                     return true;
                 }
             }
-
-            Debug.LogWarning($"[EnemyController] Spawn is blocked and no free neighbor found at {currentCell}");
             return false;
         }
 
         private IEnumerator MoveCellTo(Vector3Int targetCell)
         {
             if (groundTilemap == null) yield break;
-
             isMoving = true;
-
             Vector3 startPos = transform.position;
             Vector3 targetPos = groundTilemap.GetCellCenterWorld(targetCell);
-
             float t = 0f;
             while (t < 1f)
             {
@@ -255,10 +189,8 @@ namespace DPBomberman.Patterns.Strategy
                 transform.position = Vector3.Lerp(startPos, targetPos, t);
                 yield return null;
             }
-
             currentCell = targetCell;
             SnapToCell(currentCell);
-
             isMoving = false;
         }
 

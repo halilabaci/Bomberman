@@ -16,6 +16,9 @@ namespace DPBomberman.Patterns.State
         public void Enter()
         {
             Debug.Log("[STATE] Enter MainMenu");
+            game.SetGameplayInput(false);
+            Time.timeScale = 1f;
+
             // TODO (Faz 2+): UI aç, menü inputlarýný aktif et
         }
 
@@ -27,11 +30,7 @@ namespace DPBomberman.Patterns.State
 
         public void Tick(float deltaTime)
         {
-            // Test amaçlý: P basýnca oyuna geç
-            if (Input.GetKeyDown(KeyCode.P))
-            {
-                machine.ChangeState(new PlayingState(game, machine));
-            }
+           
         }
     }
 }

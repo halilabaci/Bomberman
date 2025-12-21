@@ -17,6 +17,7 @@ namespace DPBomberman.Patterns.State
         {
             Debug.Log("[STATE] Enter Paused");
             // TODO (Faz 2+): Time.timeScale = 0 veya input kilitleme
+            game.SetGameplayInput(false);
             Time.timeScale = 0f;
         }
 
