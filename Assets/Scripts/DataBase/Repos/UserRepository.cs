@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 
 public class UserRepository
@@ -18,26 +18,17 @@ public class UserRepository
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(passwordPlain))
             return null;
 
+        username = username.Trim();
         if (UsernameExists(username)) return null;
 
         var user = new UserRow
         {
-            Username = username.Trim(),
+            Username = username,
             PasswordHash = PasswordHasher.Sha256(passwordPlain),
             CreatedAtIso = DateTime.UtcNow.ToString("o")
         };
 
-        DbManager.DB.Insert(user);
-
-        // Stats init
-        DbManager.DB.Insert(new GameStatsRow
-        {
-            UserId = user.Id,
-            Wins = 0,
-            Losses = 0,
-            TotalGames = 0
-        });
-
+        DbManager.DB.Insert(user); // sadece user insert
         return user;
     }
 

@@ -3,39 +3,73 @@ using System.Linq;
 
 public class GameStatsRepository
 {
-    public GameStatsRow GetStats(int userId)
+    // 1 user = 1 stats satýrý olacak þekilde tasarlýyoruz.
+    // Bunun için GameStatsRow'da [PrimaryKey] public int UserId {get;set;} olmalý.
+
+    public GameStatsRow Get(int userId)
     {
-        return DbManager.DB.Table<GameStatsRow>().FirstOrDefault(s => s.UserId == userId);
+        // PrimaryKey ise en temiz yol:
+        return DbManager.DB.Find<GameStatsRow>(userId);
+        // Eðer PK deðilse eski yöntemin gerekir:
+        // return DbManager.DB.Table<GameStatsRow>().FirstOrDefault(s => s.UserId == userId);
+    }
+
+    public void EnsureDefaults(int userId)
+    {
+        var row = Get(userId);
+        if (row != null) return;
+
+        DbManager.DB.Insert(new GameStatsRow
+        {
+            UserId = userId,
+            Wins = 0,
+            Losses = 0,
+            TotalGames = 0
+        });
     }
 
     public void RecordMatch(int userId, bool isWin)
     {
-        var stats = GetStats(userId);
-        if (stats == null)
-        {
-            stats = new GameStatsRow { UserId = userId, Wins = 0, Losses = 0, TotalGames = 0 };
-            DbManager.DB.Insert(stats);
-        }
+        EnsureDefaults(userId);
 
-        stats.TotalGames++;
-        if (isWin) stats.Wins++;
-        else stats.Losses++;
+        var stats = Get(userId);
+        stats.TotalGames += 1;
+        if (isWin) stats.Wins += 1;
+        else stats.Losses += 1;
 
         DbManager.DB.Update(stats);
     }
 
-    public List<(string username, int wins, int losses, int total)> GetLeaderboardTop(int limit)
+    public List<LeaderboardEntry> GetTopPlayers(int limit = 10)
     {
-        var users = DbManager.DB.Table<UserRow>().ToList();
-        var stats = DbManager.DB.Table<GameStatsRow>().ToList();
+        // wins desc, sonra total desc (istersen losses asc da eklenir)
+        var topStats = DbManager.DB.Table<GameStatsRow>()
+            .OrderByDescending(s => s.Wins)
+            .ThenByDescending(s => s.TotalGames)
+            .Take(limit)
+            .ToList();
 
-        var joined = (from s in stats
-                      join u in users on s.UserId equals u.Id
-                      orderby s.Wins descending, s.TotalGames descending
-                      select (u.Username, s.Wins, s.Losses, s.TotalGames))
-                     .Take(limit)
-                     .ToList();
+        // Username map
+        var userMap = DbManager.DB.Table<UserRow>()
+            .ToList()
+            .ToDictionary(u => u.Id, u => u.Username);
 
-        return joined;
+        var result = new List<LeaderboardEntry>(topStats.Count);
+        foreach (var s in topStats)
+        {
+            userMap.TryGetValue(s.UserId, out var uname);
+
+            result.Add(new LeaderboardEntry
+            {
+                UserId = s.UserId,
+                Username = uname ?? $"User{s.UserId}",
+                Wins = s.Wins,
+                Losses = s.Losses,
+                TotalGames = s.TotalGames
+            });
+        }
+
+        return result;
     }
 }
+

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using UnityEngine;
 using SQLite;
 
@@ -17,12 +17,14 @@ public static class DbManager
 
     public static void Init()
     {
+        if (_db != null) return; // ✅ tekrar init olmasın
+
         var dbPath = Path.Combine(Application.persistentDataPath, "game.db");
         _db = new SQLiteConnection(dbPath);
 
-        // tablolar yoksa olu�turur
         _db.CreateTable<UserRow>();
         _db.CreateTable<GameStatsRow>();
+        _db.CreateTable<PreferencesRow>(); // ✅ doğru tablo
 
         Debug.Log($"[DB] Ready: {dbPath}");
     }

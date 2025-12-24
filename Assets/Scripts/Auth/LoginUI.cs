@@ -4,15 +4,25 @@ using TMPro;
 
 public class LoginUI : MonoBehaviour
 {
+    [Header("UI")]
     public TMP_InputField usernameInput;
     public TMP_InputField passwordInput;
     public TMP_Text statusText;
 
-    private UserRepository userRepo = new UserRepository();
+    // ✅ Tek giriş noktası (Facade)
+    private GameDataService dataService;
+
+    private void Awake()
+    {
+        dataService = new GameDataService();
+    }
 
     public void OnRegister()
     {
-        var user = userRepo.Register(usernameInput.text, passwordInput.text);
+        var username = usernameInput.text;
+        var password = passwordInput.text;
+
+        var user = dataService.Register(username, password);
         if (user == null)
         {
             statusText.color = Color.red;
@@ -26,7 +36,10 @@ public class LoginUI : MonoBehaviour
 
     public void OnLogin()
     {
-        var user = userRepo.Login(usernameInput.text, passwordInput.text);
+        var username = usernameInput.text;
+        var password = passwordInput.text;
+
+        var user = dataService.Login(username, password);
         if (user == null)
         {
             statusText.color = Color.red;
@@ -34,6 +47,13 @@ public class LoginUI : MonoBehaviour
             return;
         }
 
-        SceneManager.LoadScene("MainMenu"); 
+        // ✅ Session tek noktadan set edilir
+        Session.SetUser(user.Id, user.Username);
+
+        // ✅ Theme DB'den servis üzerinden okunur
+        var theme = dataService.GetTheme(user.Id);
+        Debug.Log("[Theme] " + theme);
+
+        SceneManager.LoadScene("MainMenu");
     }
 }
