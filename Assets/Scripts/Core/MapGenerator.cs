@@ -1,34 +1,36 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 using UnityEngine.Tilemaps;
 using DPBomberman.Models;
 using DPBomberman.Patterns.Factory;
 
-public class MapGenerator : MonoBehaviour
+public class MapGenerator : BaseMapGeneratorTemplate
 {
-    [Header("Harita Ayarlarý")]
+    [Header("Harita AyarlarÄ±")]
     public int width = 20;
     public int height = 15;
     public int seed = 123;
 
-    [Header("Görseller (Tile'lar) - Fallback (Factory yoksa)")]
+    [Header("GÃ¶rseller (Tile'lar) - Fallback (Factory yoksa)")]
     public TileBase groundTile;
     public TileBase solidTile;
     public TileBase breakableTile;
     public TileBase hardTile;
 
-    [Header("Unity Baðlantýlarý")]
+    [Header("Unity BaÄŸlantÄ±larÄ±")]
     public Tilemap groundTilemap;
     public Tilemap solidTilemap;
     public Tilemap breakableTilemap;
     public Tilemap hardTilemap;
 
     [Range(0, 1)] public float breakableDensity = 0.5f;
-    [Range(0, 1)] public float hardDensity = 0.15f; // breakable içinde hard oraný
+    [Range(0, 1)] public float hardDensity = 0.15f; // breakable iÃ§inde hard oranÄ±
 
-    // IMPORTANT: FAZ 2'de harita üretimini State yönetecek.
-    // void Start() { GenerateMap(); }
+    // Runtime
+    private System.Random rng;
 
-    // 4 köþe spawn bölgeleri: köþe hücresi + 2 komþusu
+    // Cache tiles for current generation (factory ya da fallback)
+    private TileBase gTile, sTile, bTile, hTile;
+
     private bool IsSpawnZone(int x, int y)
     {
         bool bottomLeft = (x == 1 && y == 1) || (x == 1 && y == 2) || (x == 2 && y == 1);
@@ -39,82 +41,101 @@ public class MapGenerator : MonoBehaviour
         return bottomLeft || bottomRight || topLeft || topRight;
     }
 
-    /// <summary>
-    /// Haritayý üretir. Factory verilirse theme tile'larý kullanýlýr; verilmezse fallback tile'lar kullanýlýr.
-    /// </summary>
-    [ContextMenu("Haritayý Oluþtur")]
-    public void GenerateMap(IWallTileFactory factory = null)
+    // âœ… 1) ClearMap
+    protected override void ClearMap()
     {
         if (!groundTilemap || !solidTilemap || !breakableTilemap)
         {
-            Debug.LogError("Tilemap baðlantýlarý eksik! (ground/solid/breakable)");
+            Debug.LogError("Tilemap baÄŸlantÄ±larÄ± eksik! (ground/solid/breakable)");
             return;
         }
 
-        // Factory varsa tile'larý oradan al; yoksa fallback kullan
-        TileBase gTile = factory != null ? factory.GetTile(WallType.Ground) : groundTile;
-        TileBase sTile = factory != null ? factory.GetTile(WallType.Unbreakable) : solidTile;
-        TileBase bTile = factory != null ? factory.GetTile(WallType.Breakable) : breakableTile;
-        TileBase hTile = factory != null ? factory.GetTile(WallType.Hard) : hardTile;
+        // Factory varsa tile'larÄ± oradan al; yoksa fallback kullan
+        gTile = currentFactory != null ? currentFactory.GetTile(WallType.Ground) : groundTile;
+        sTile = currentFactory != null ? currentFactory.GetTile(WallType.Unbreakable) : solidTile;
+        bTile = currentFactory != null ? currentFactory.GetTile(WallType.Breakable) : breakableTile;
+        hTile = currentFactory != null ? currentFactory.GetTile(WallType.Hard) : hardTile;
 
-        // Minimum tile kontrolü
+        // Minimum tile kontrolÃ¼
         if (!gTile || !sTile || !bTile)
         {
             Debug.LogError(
-                "Tile baðlantýlarý eksik! (ground/solid/breakable). " +
-                "Factory kullanýyorsan ThemeFactorySO slotlarýný doldur, yoksa Inspector tile'larýný doldur."
+                "Tile baÄŸlantÄ±larÄ± eksik! (ground/solid/breakable). " +
+                "Factory kullanÄ±yorsan ThemeFactorySO slotlarÄ±nÄ± doldur, yoksa Inspector tile'larÄ±nÄ± doldur."
             );
             return;
         }
 
-        // Opsiyonel hard kontrolü
         if (hardTilemap == null && hTile != null)
-        {
-            Debug.LogWarning("[MapGenerator] Hard tile var ama hardTilemap atanmadý. Hard duvar basýlmayacak.");
-        }
+            Debug.LogWarning("[MapGenerator] Hard tile var ama hardTilemap atanmadÄ±. Hard duvar basÄ±lmayacak.");
 
         groundTilemap.ClearAllTiles();
         solidTilemap.ClearAllTiles();
         breakableTilemap.ClearAllTiles();
         hardTilemap?.ClearAllTiles();
 
-        System.Random rng = new System.Random(seed);
+        rng = new System.Random(seed);
 
+        // Ground'u burada basalÄ±m (senin Ã¶nceki koddaki gibi)
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                groundTilemap.SetTile(new Vector3Int(x, y, 0), gTile);
+    }
+
+    // âœ… 2) OuterWalls
+    protected override void PlaceOuterWalls()
+    {
         for (int x = 0; x < width; x++)
         {
-            for (int y = 0; y < height; y++)
+            solidTilemap.SetTile(new Vector3Int(x, 0, 0), sTile);
+            solidTilemap.SetTile(new Vector3Int(x, height - 1, 0), sTile);
+        }
+        for (int y = 0; y < height; y++)
+        {
+            solidTilemap.SetTile(new Vector3Int(0, y, 0), sTile);
+            solidTilemap.SetTile(new Vector3Int(width - 1, y, 0), sTile);
+        }
+    }
+
+    // âœ… 3) InnerWalls (senin mevcut mantÄ±ÄŸÄ±n)
+    protected override void PlaceInnerWalls()
+    {
+        for (int x = 1; x < width - 1; x++)
+        {
+            for (int y = 1; y < height - 1; y++)
             {
                 Vector3Int pos = new Vector3Int(x, y, 0);
 
-                groundTilemap.SetTile(pos, gTile);
-
-                // Kenar duvarlarý
-                if (x == 0 || x == width - 1 || y == 0 || y == height - 1)
+                // Ä°Ã§ kolonlar
+                if (x % 2 == 0 && y % 2 == 0)
                 {
                     solidTilemap.SetTile(pos, sTile);
+                    continue;
                 }
-                // Ýç kolonlar
-                else if (x % 2 == 0 && y % 2 == 0)
-                {
-                    solidTilemap.SetTile(pos, sTile);
-                }
-                else
-                {
-                    // Spawn bölgeleri boþ kalsýn
-                    if (IsSpawnZone(x, y))
-                        continue;
 
-                    if (rng.NextDouble() < breakableDensity)
-                    {
-                        if (hardTilemap != null && hTile != null && rng.NextDouble() < hardDensity)
-                            hardTilemap.SetTile(pos, hTile);
-                        else
-                            breakableTilemap.SetTile(pos, bTile);
-                    }
+                // Spawn bÃ¶lgeleri boÅŸ kalsÄ±n
+                if (IsSpawnZone(x, y)) continue;
+
+                // Breakable / Hard daÄŸÄ±lÄ±mÄ±
+                if (rng.NextDouble() < breakableDensity)
+                {
+                    if (hardTilemap != null && hTile != null && rng.NextDouble() < hardDensity)
+                        hardTilemap.SetTile(pos, hTile);
+                    else
+                        breakableTilemap.SetTile(pos, bTile);
                 }
             }
         }
+    }
 
+    // âœ… 4-5-6 ÅŸimdilik boÅŸ bÄ±rakabiliriz (FAZ 4 rapor iÃ§in yeter)
+    protected override void PlacePlayers() { /* Ä°stersen sonra spawn ekleriz */ }
+    protected override void PlaceEnemies() { /* Ä°stersen sonra spawn ekleriz */ }
+    protected override void PlacePowerUps() { /* Ä°stersen sonra daÄŸÄ±tÄ±rÄ±z */ }
+
+    // âœ… Kamera vs.
+    protected override void AfterGenerate()
+    {
         AdjustCamera();
     }
 
@@ -123,5 +144,12 @@ public class MapGenerator : MonoBehaviour
         if (Camera.main == null) return;
         Camera.main.transform.position = new Vector3(width / 2f - 0.5f, height / 2f - 0.5f, -10f);
         Camera.main.orthographicSize = height / 2f + 1f;
+    }
+
+    // Inspector'dan test iÃ§in
+    [ContextMenu("HaritayÄ± OluÅŸtur")]
+    private void GenerateFromContextMenu()
+    {
+        GenerateMap(null);
     }
 }
