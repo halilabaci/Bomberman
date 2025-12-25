@@ -640,6 +640,10 @@ PrefabInstance:
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
       objectReference: {fileID: 1508890497539107539}
+    - target: {fileID: 3374669523470348488, guid: 411439b8add0f3f4499f500b1e1ba69e, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_MethodName
+      value: OnMainMenuClicked
+      objectReference: {fileID: 0}
     - target: {fileID: 3844231568025780223, guid: 411439b8add0f3f4499f500b1e1ba69e, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
