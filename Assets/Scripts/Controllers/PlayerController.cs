@@ -34,6 +34,7 @@ namespace DPBomberman.Controllers
             stats = GetComponent<PlayerStatsHolder>();
             if (bombSystem == null) bombSystem = Object.FindFirstObjectByType<BombSystem>();
             if (actor == null) actor = GetComponent<DamageableActor>();
+            baseStepDuration = stepDuration; // Başlangıç hızını kaydet
         }
 
         private void Start()
@@ -42,20 +43,17 @@ namespace DPBomberman.Controllers
             if (!IsOwner) return;
 
             // --- OTOMATİK BULMA SİSTEMİ ---
-            // Eğer kutular boşsa (ki prefabdan doğduğu için boş olacak), isimle bulalım:
             if (groundTilemap == null)
-                groundTilemap = GameObject.Find("Ground")?.GetComponent<UnityEngine.Tilemaps.Tilemap>();
+                groundTilemap = GameObject.Find("Ground")?.GetComponent<Tilemap>();
 
             if (solidTilemap == null)
-                solidTilemap = GameObject.Find("Walls_Solid")?.GetComponent<UnityEngine.Tilemaps.Tilemap>();
+                solidTilemap = GameObject.Find("Walls_Solid")?.GetComponent<Tilemap>();
 
             if (breakableTilemap == null)
-                breakableTilemap = GameObject.Find("Walls_Breakable")?.GetComponent<UnityEngine.Tilemaps.Tilemap>();
+                breakableTilemap = GameObject.Find("Walls_Breakable")?.GetComponent<Tilemap>();
 
             if (hardTilemap == null)
-                hardTilemap = GameObject.Find("Walls_Hard")?.GetComponent<UnityEngine.Tilemaps.Tilemap>();
-
-            // BombSystem ve Actor zaten Awake içinde GetComponent ile kendisini buluyor, onlara dokunma.
+                hardTilemap = GameObject.Find("Walls_Hard")?.GetComponent<Tilemap>();
 
             // Pozisyonu hücreye sabitle
             if (groundTilemap != null)
@@ -71,24 +69,39 @@ namespace DPBomberman.Controllers
 
         private void Update()
         {
-            // Sadece bu karakterin sahibiysen Update çalışsın
-            if (!IsOwner) return; // <--- EKLE
+            // 1. Önce sadece sahibi olduğumuz karakterin tehlike durumuna bakalım
+            if (!IsOwner) return;
 
-            // Input YOK: sadece ölüm/danger kontrolü var
             if (actor != null && actor.IsDead) return;
 
+            // 2. Eğer bulunduğumuz hücre tehlikeliyse (bomba patladıysa)
             if (explosionTracker != null && explosionTracker.IsCellDangerous(currentCell))
             {
-                actor?.Kill();
-                return;
+                // Kendi kendimizi öldürmek yerine Sunucuya bildiriyoruz
+                NotifyServerOfDeathServerRpc();
             }
         }
 
-        // TryMove ve TryPlaceBomb kısımları Command Pattern ile dışarıdan (InputHandler'dan)
-        // çağırıldığı için InputHandler'da da "IsOwner" kontrolü yapmamız gerekecek.
+        [ServerRpc]
+        private void NotifyServerOfDeathServerRpc()
+        {
+            // Sunucu (Host) ölümü onaylar ve herkese "Bu oyuncu öldü!" der
+            HandleDeathClientRpc();
+        }
+
+        [ClientRpc]
+        private void HandleDeathClientRpc()
+        {
+            // Bu fonksiyon her iki oyuncunun ekranında da aynı anda çalışır
+            actor?.Kill();
+
+            // Opsiyonel: Buraya Game Over UI'sını açacak kodu ekleyebilirsin
+            Debug.Log("B-3 Senkronizasyonu: Bir oyuncu patlamada can verdi!");
+        }
+
         public void TryMove(Vector3Int dir)
         {
-            if (!IsOwner) return; // <--- EKLE
+            if (!IsOwner) return;
             if (actor != null && actor.IsDead) return;
             if (isMoving) return;
             if (dir == Vector3Int.zero) return;
@@ -99,16 +112,27 @@ namespace DPBomberman.Controllers
             StartCoroutine(MoveCellTo(targetCell));
         }
 
-        // ✅ Command'lerin çağıracağı giriş noktası
+        // ✅ COMMAND'lerin çağıracağı giriş noktası
         public void TryPlaceBomb()
         {
-            if (!IsOwner) return;
-
+            if (!IsOwner) return; // Sadece sahibi basabilir
             if (actor != null && actor.IsDead) return;
-            bombSystem?.TryPlaceBomb();
+
+            // Sunucuya "Bomba Koy" isteği gönderiyoruz
+            PlaceBombServerRpc();
         }
 
-        // ✅ InputHandler için basit kontrol
+        [ServerRpc]
+        private void PlaceBombServerRpc()
+        {
+            // Sunucu bu isteği aldığında BombSystem üzerinden bombayı gerçekten oluşturur
+            // Server tarafında çalıştığı için BombSystem içindeki IsServer kontrolünden geçer
+            if (bombSystem != null)
+            {
+                bombSystem.TryPlaceBomb();
+            }
+        }
+
         public bool IsDead()
         {
             return actor != null && actor.IsDead;
@@ -119,7 +143,7 @@ namespace DPBomberman.Controllers
             if (solidTilemap != null && solidTilemap.HasTile(cell)) return true;
             if (hardTilemap != null && hardTilemap.HasTile(cell)) return true;
             if (breakableTilemap != null && breakableTilemap.HasTile(cell)) return true;
-            if (!groundTilemap.HasTile(cell)) return true;
+            if (groundTilemap != null && !groundTilemap.HasTile(cell)) return true;
             return false;
         }
 
@@ -149,7 +173,8 @@ namespace DPBomberman.Controllers
 
         private void SnapToCell(Vector3Int cell)
         {
-            transform.position = groundTilemap.GetCellCenterWorld(cell);
+            if (groundTilemap != null)
+                transform.position = groundTilemap.GetCellCenterWorld(cell);
         }
 
         public Vector3Int GetCurrentCell() => currentCell;

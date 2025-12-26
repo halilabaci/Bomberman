@@ -2,6 +2,7 @@
 using UnityEngine.Tilemaps;
 using Patterns.Decorator;
 using System.Collections.Generic;
+using Unity.Netcode; // <--- Network kodları için bu şart!
 
 namespace DPBomberman.Controllers
 {
@@ -37,12 +38,13 @@ namespace DPBomberman.Controllers
                 if (groundGO != null) groundTilemap = groundGO.GetComponent<Tilemap>();
             }
 
-            // ✅ Stats sadece PLAYER üstünden alınmalı (başka holder'a kaymasın)
             if (player != null) stats = player.GetComponent<PlayerStatsHolder>();
         }
 
         public bool TryPlaceBomb()
         {
+            // ✅ MULTIPLAYER KONTROLÜ: Bombayı sadece SERVER (Host) oluşturabilir.
+            if (!NetworkManager.Singleton.IsServer) return false;
 
             if (bombPrefab == null) return false;
 
@@ -52,48 +54,46 @@ namespace DPBomberman.Controllers
             if (player == null || groundTilemap == null || damageSystem == null)
                 return false;
 
-            // stats güncel tut
             if (stats == null) stats = player.GetComponent<PlayerStatsHolder>();
 
-            // patlamış bombaları temizle
             myBombs.RemoveAll(b => b == null);
 
-            // ✅ Varsayılanlar: başlangıçta 1 bomba, default menzil
             int maxBombs = 1;
             int dynamicRange = Mathf.Max(1, defaultRange);
 
-            // ✅ PowerUp alındıysa burada artar
             if (stats != null)
             {
                 maxBombs = Mathf.Max(1, stats.BombCount);
                 dynamicRange = Mathf.Max(1, stats.BombPower);
             }
 
-            Debug.Log($"[BombSystem] myBombs={myBombs.Count}, maxBombs={maxBombs}, range={dynamicRange}");
-
-            // ✅ aynı anda maxBombs kadar bomba
             if (myBombs.Count >= maxBombs) return false;
 
             Vector3Int cell = player.GetCurrentCell();
 
-            // aynı hücreye ikinci bomba koyma
             for (int i = 0; i < myBombs.Count; i++)
             {
                 if (myBombs[i] == null) continue;
-
                 Vector3Int bombCell = groundTilemap.WorldToCell(myBombs[i].transform.position);
                 if (bombCell == cell) return false;
             }
 
-            // powerup üstüne bomba koyma
             if (PowerUpRegistry.Has(cell)) return false;
 
-            // spawn
+            // ✅ SPAWN İŞLEMİ
             var bombObj = Instantiate(bombPrefab);
+
+            // 🔥 SİHİRLİ DOKUNUŞ: Bombayı ağ üzerinde herkes için oluşturur!
+            var netObj = bombObj.GetComponent<NetworkObject>();
+            if (netObj != null)
+            {
+                netObj.Spawn();
+            }
+
             var bomb = bombObj.GetComponent<BombController>();
             if (bomb == null)
             {
-                Destroy(bombObj);
+                bombObj.GetComponent<NetworkObject>().Despawn(); // Hata varsa ağdan da sil
                 return false;
             }
 
@@ -106,7 +106,6 @@ namespace DPBomberman.Controllers
             myBombs.Add(bomb);
             bomb.Arm(cell);
 
-            // fallback: fuse bitince listeden düş
             StartCoroutine(RemoveAfterFuse(bomb, fuseSeconds + 0.25f));
 
             return true;
@@ -115,7 +114,7 @@ namespace DPBomberman.Controllers
         private System.Collections.IEnumerator RemoveAfterFuse(BombController bomb, float seconds)
         {
             yield return new WaitForSeconds(seconds);
-            myBombs.Remove(bomb);
+            if (bomb != null) myBombs.Remove(bomb);
         }
     }
 }
