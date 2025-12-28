@@ -13,7 +13,7 @@ public class GameManager : MonoBehaviour
     [Header("Scene References (auto-bind)")]
     public MapGenerator mapGenerator;
     public MapLogicAdapter mapLogicAdapter;
-    
+
     [Header("Input")]
     public DPBomberman.InputSystem.InputHandler inputHandler;
 
@@ -41,7 +41,7 @@ public class GameManager : MonoBehaviour
         // --- State Machine ---
         stateMachine = new GameStateMachine();
 
-        // Sahne event aboneliği
+        // Scene event aboneliği
         SceneManager.sceneLoaded -= OnSceneLoaded;
         SceneManager.sceneLoaded += OnSceneLoaded;
 
@@ -65,8 +65,6 @@ public class GameManager : MonoBehaviour
 
     private void OnDestroy()
     {
-        // DÜZELTME: Buradaki gereksiz State değiştirme kodları silindi.
-        // OnDestroy sadece temizlik yapar.
         if (Instance == this)
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
@@ -80,7 +78,6 @@ public class GameManager : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        // SceneLoaded geldiğinde bayrağı kaldıralım
         bootstrapped = true;
 
         Time.timeScale = 1f;
@@ -104,9 +101,8 @@ public class GameManager : MonoBehaviour
         mapGenerator = FindFirstObjectByType<MapGenerator>();
         mapLogicAdapter = FindFirstObjectByType<MapLogicAdapter>();
         uiManager = FindFirstObjectByType<UIManager>(FindObjectsInactive.Include);
-        
-        // Merge sonrası bağlantı koparsa diye InputHandler'ı da bulalım
-        if(inputHandler == null)
+
+        if (inputHandler == null)
             inputHandler = FindFirstObjectByType<DPBomberman.InputSystem.InputHandler>();
 
         var sceneName = SceneManager.GetActiveScene().name.ToLowerInvariant();
@@ -159,25 +155,26 @@ public class GameManager : MonoBehaviour
         };
     }
 
+    // ✅ GÜNCEL: Scene load tek yerden (Single'da SceneManager, Netcode varsa server)
     public void StartGame(ThemeType theme)
     {
         Time.timeScale = 1f;
         SetTheme(theme);
-        SceneManager.LoadScene(GetSceneNameForTheme(theme));
+        LevelLoader.LoadLevel(GetSceneNameForTheme(theme));
     }
 
     public void RestartLevel()
     {
         Debug.Log("[GameManager] RestartLevel CALLED");
         Time.timeScale = 1f;
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        LevelLoader.LoadLevel(SceneManager.GetActiveScene().name);
     }
 
     public void GoToMainMenu()
     {
         Debug.Log("[GameManager] GoToMainMenu CALLED");
         Time.timeScale = 1f;
-        SceneManager.LoadScene("MainMenu");
+        LevelLoader.LoadLevel("MainMenu");
     }
 
     public void OnPlayerDied() => GoToGameOver();

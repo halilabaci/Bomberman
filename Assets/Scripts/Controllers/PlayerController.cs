@@ -1,7 +1,8 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using UnityEngine;
 using Unity.Netcode;
 using UnityEngine.Tilemaps;
-using Patterns.Decorator;
+using UnityEngine.SceneManagement;
 
 namespace DPBomberman.Controllers
 {
@@ -20,83 +21,101 @@ namespace DPBomberman.Controllers
         public ExplosionAreaTracker explosionTracker;
         public DamageableActor actor;
 
-        [Tooltip("Bir hücreden diğerine geçiş süresi (sn). 0.08-0.15 arası iyi.)")]
+        [Tooltip("Bir hücreden diğerine geçiş süresi (sn). 0.08-0.15 arası iyi.")]
         public float stepDuration = 0.12f;
 
         private bool isMoving;
         private Vector3Int currentCell;
 
-        private PlayerStatsHolder stats;
         private float baseStepDuration;
 
         private void Awake()
         {
-            stats = GetComponent<PlayerStatsHolder>();
-            if (bombSystem == null) bombSystem = Object.FindFirstObjectByType<BombSystem>();
             if (actor == null) actor = GetComponent<DamageableActor>();
-            baseStepDuration = stepDuration; // Başlangıç hızını kaydet
+            if (bombSystem == null) bombSystem = GetComponent<BombSystem>(); // ✅ yanlış find kaldırıldı
+
+            baseStepDuration = stepDuration;
+
+            // ✅ ÇAKIŞMA ÖNLE: Rigidbody tabanlı PlayerMovement varsa kapat
+            var rbMove = GetComponent<PlayerMovement>();
+            if (rbMove != null) rbMove.enabled = false;
         }
 
-        private void Start()
+        private void OnEnable()
         {
-            // Sadece bu karakterin sahibiysen (senin karakterinse) bu işlemleri yap
-            if (!IsOwner) return;
+            SceneManager.sceneLoaded += OnSceneLoadedRebind;
+        }
 
-            // --- OTOMATİK BULMA SİSTEMİ ---
-            if (groundTilemap == null)
-                groundTilemap = GameObject.Find("Ground")?.GetComponent<Tilemap>();
+        private void OnDisable()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoadedRebind;
+        }
 
-            if (solidTilemap == null)
-                solidTilemap = GameObject.Find("Walls_Solid")?.GetComponent<Tilemap>();
+        public override void OnNetworkSpawn()
+        {
+            // Player menu'de spawn olsa bile, level gelince rebind edeceğiz
+            RebindTilemapsAndSnap();
+            base.OnNetworkSpawn();
+        }
 
-            if (breakableTilemap == null)
-                breakableTilemap = GameObject.Find("Walls_Breakable")?.GetComponent<Tilemap>();
+        private void OnSceneLoadedRebind(Scene scene, LoadSceneMode mode)
+        {
+            RebindTilemapsAndSnap();
+        }
 
-            if (hardTilemap == null)
-                hardTilemap = GameObject.Find("Walls_Hard")?.GetComponent<Tilemap>();
+        private void RebindTilemapsAndSnap()
+        {
+            BindTilemaps();
 
-            // Pozisyonu hücreye sabitle
             if (groundTilemap != null)
             {
                 currentCell = groundTilemap.WorldToCell(transform.position);
                 SnapToCell(currentCell);
             }
-            else
-            {
-                Debug.LogError("DİKKAT: Sahnede 'Ground' isminde bir Tilemap bulunamadı!");
-            }
+        }
+
+        private void BindTilemaps()
+        {
+            // Sahneye göre tilemap objeleri farklı hiyerarşide olabilir → TilemapFinder ile yakala
+            if (groundTilemap == null) groundTilemap = TilemapFinder.Find("Ground");
+            if (solidTilemap == null) solidTilemap = TilemapFinder.Find("Walls_Solid");
+            if (breakableTilemap == null) breakableTilemap = TilemapFinder.Find("Walls_Breakable");
+            if (hardTilemap == null) hardTilemap = TilemapFinder.Find("Walls_Hard");
+
+            // Bazı sahnelerde isimler farklıysa "contains" yakalayacak
         }
 
         private void Update()
         {
-            // 1. Önce sadece sahibi olduğumuz karakterin tehlike durumuna bakalım
             if (!IsOwner) return;
-
             if (actor != null && actor.IsDead) return;
 
-            // 2. Eğer bulunduğumuz hücre tehlikeliyse (bomba patladıysa)
-            if (explosionTracker != null && explosionTracker.IsCellDangerous(currentCell))
+            // Tilemap null kalmışsa tekrar bağlanmayı dene (özellikle menu->level geçişi)
+            if (groundTilemap == null) BindTilemaps();
+
+            // (Opsiyonel) client-side tehlike kontrolü (asıl kill server’dan geliyor)
+            if (explosionTracker != null && groundTilemap != null)
             {
-                // Kendi kendimizi öldürmek yerine Sunucuya bildiriyoruz
-                NotifyServerOfDeathServerRpc();
+                var cell = groundTilemap.WorldToCell(transform.position);
+                currentCell = cell;
+
+                if (explosionTracker.IsCellDangerous(currentCell))
+                {
+                    NotifyServerOfDeathServerRpc();
+                }
             }
         }
 
         [ServerRpc]
         private void NotifyServerOfDeathServerRpc()
         {
-            // Sunucu (Host) ölümü onaylar ve herkese "Bu oyuncu öldü!" der
-            HandleDeathClientRpc();
+            KillClientRpc();
         }
 
         [ClientRpc]
-        private void HandleDeathClientRpc()
+        public void KillClientRpc()
         {
-            // Bu fonksiyon her iki oyuncunun ekranında da aynı anda çalışır
             actor?.Kill();
-
-            // Opsiyonel: Buraya Game Over UI'sını açacak kodu ekleyebilirsin
-            Debug.Log("B-3 Senkronizasyonu: Bir oyuncu patlamada can verdi!");
         }
 
         public void TryMove(Vector3Int dir)
@@ -106,31 +125,28 @@ namespace DPBomberman.Controllers
             if (isMoving) return;
             if (dir == Vector3Int.zero) return;
 
+            if (groundTilemap == null) BindTilemaps();
+            if (groundTilemap == null) return;
+
             Vector3Int targetCell = currentCell + dir;
             if (IsBlocked(targetCell)) return;
 
             StartCoroutine(MoveCellTo(targetCell));
         }
 
-        // ✅ COMMAND'lerin çağıracağı giriş noktası
         public void TryPlaceBomb()
         {
-            if (!IsOwner) return; // Sadece sahibi basabilir
+            if (!IsOwner) return;
             if (actor != null && actor.IsDead) return;
 
-            // Sunucuya "Bomba Koy" isteği gönderiyoruz
             PlaceBombServerRpc();
         }
 
         [ServerRpc]
         private void PlaceBombServerRpc()
         {
-            // Sunucu bu isteği aldığında BombSystem üzerinden bombayı gerçekten oluşturur
-            // Server tarafında çalıştığı için BombSystem içindeki IsServer kontrolünden geçer
             if (bombSystem != null)
-            {
                 bombSystem.TryPlaceBomb();
-            }
         }
 
         public bool IsDead()
@@ -140,34 +156,36 @@ namespace DPBomberman.Controllers
 
         private bool IsBlocked(Vector3Int cell)
         {
+            // Bombayı blok say
+            if (BombRegistry.Has(cell)) return true;
+
             if (solidTilemap != null && solidTilemap.HasTile(cell)) return true;
             if (hardTilemap != null && hardTilemap.HasTile(cell)) return true;
             if (breakableTilemap != null && breakableTilemap.HasTile(cell)) return true;
+
+            // ground yoksa yürünemez
             if (groundTilemap != null && !groundTilemap.HasTile(cell)) return true;
+
             return false;
         }
 
-        private System.Collections.IEnumerator MoveCellTo(Vector3Int targetCell)
+        private IEnumerator MoveCellTo(Vector3Int targetCell)
         {
             isMoving = true;
 
             Vector3 startPos = transform.position;
             Vector3 targetPos = groundTilemap.GetCellCenterWorld(targetCell);
 
-            float speedValue = (stats != null) ? Mathf.Max(0.1f, stats.Speed) : 1f;
-            float effectiveStepDuration = baseStepDuration / speedValue;
-
             float t = 0f;
             while (t < 1f)
             {
-                t += Time.deltaTime / Mathf.Max(0.001f, effectiveStepDuration);
+                t += Time.deltaTime / Mathf.Max(0.001f, stepDuration);
                 transform.position = Vector3.Lerp(startPos, targetPos, t);
                 yield return null;
             }
 
             currentCell = targetCell;
             SnapToCell(currentCell);
-
             isMoving = false;
         }
 

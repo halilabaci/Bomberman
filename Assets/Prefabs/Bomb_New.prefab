@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 6064955606529513387}
   - component: {fileID: 3161262043934525200}
   m_Layer: 0
-  m_Name: Bomb
+  m_Name: Bomb_New
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

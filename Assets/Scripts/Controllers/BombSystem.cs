@@ -2,11 +2,11 @@
 using UnityEngine.Tilemaps;
 using Patterns.Decorator;
 using System.Collections.Generic;
-using Unity.Netcode; // <--- Network kodları için bu şart!
+using Unity.Netcode;
 
 namespace DPBomberman.Controllers
 {
-    public class BombSystem : MonoBehaviour
+    public class BombSystem : NetworkBehaviour
     {
         [Header("Prefab")]
         [SerializeField] private GameObject bombPrefab;
@@ -24,37 +24,38 @@ namespace DPBomberman.Controllers
         private PlayerStatsHolder stats;
         private readonly List<BombController> myBombs = new List<BombController>();
 
-        private void Awake() => AutoWire();
-
-        private void AutoWire()
+        private void Awake()
         {
-            if (player == null) player = Object.FindFirstObjectByType<PlayerController>();
+            // BombSystem player prefab üzerinde olmalı:
+            if (player == null) player = GetComponent<PlayerController>();
+            if (stats == null && player != null) stats = player.GetComponent<PlayerStatsHolder>();
+        }
+
+        private void EnsureRefs()
+        {
             if (damageSystem == null) damageSystem = Object.FindFirstObjectByType<TilemapDamageSystem>();
             if (mapLogicAdapter == null) mapLogicAdapter = Object.FindFirstObjectByType<MapLogicAdapter>();
 
-            if (groundTilemap == null)
-            {
-                var groundGO = GameObject.Find("Ground");
-                if (groundGO != null) groundTilemap = groundGO.GetComponent<Tilemap>();
-            }
+            // Tilemap'i isim bağımlılığını azaltarak bul
+            if (groundTilemap == null) groundTilemap = TilemapFinder.Find("Ground");
+            if (groundTilemap == null) groundTilemap = TilemapFinder.Find("Tilemap"); // en son fallback
 
-            if (player != null) stats = player.GetComponent<PlayerStatsHolder>();
+            if (stats == null && player != null) stats = player.GetComponent<PlayerStatsHolder>();
         }
 
         public bool TryPlaceBomb()
         {
-            // ✅ MULTIPLAYER KONTROLÜ: Bombayı sadece SERVER (Host) oluşturabilir.
-            if (!NetworkManager.Singleton.IsServer) return false;
-
+            // Bombayı sadece Server (Host) oluşturur
+            if (!NetworkManager.Singleton || !NetworkManager.Singleton.IsServer) return false;
             if (bombPrefab == null) return false;
 
-            if (player == null || groundTilemap == null || damageSystem == null)
-                AutoWire();
+            EnsureRefs();
 
             if (player == null || groundTilemap == null || damageSystem == null)
+            {
+                Debug.LogWarning("[BombSystem] Missing refs. player/ground/damageSystem");
                 return false;
-
-            if (stats == null) stats = player.GetComponent<PlayerStatsHolder>();
+            }
 
             myBombs.RemoveAll(b => b == null);
 
@@ -69,8 +70,10 @@ namespace DPBomberman.Controllers
 
             if (myBombs.Count >= maxBombs) return false;
 
-            Vector3Int cell = player.GetCurrentCell();
+            // Server tarafında cell'i transform position'dan hesapla
+            Vector3Int cell = groundTilemap.WorldToCell(player.transform.position);
 
+            // Aynı hücrede bomba varsa koyma
             for (int i = 0; i < myBombs.Count; i++)
             {
                 if (myBombs[i] == null) continue;
@@ -79,21 +82,21 @@ namespace DPBomberman.Controllers
             }
 
             if (PowerUpRegistry.Has(cell)) return false;
+            if (BombRegistry.Has(cell)) return false;
 
-            // ✅ SPAWN İŞLEMİ
-            var bombObj = Instantiate(bombPrefab);
+            // Spawn: pozisyonu önce ayarla
+            var worldPos = groundTilemap.GetCellCenterWorld(cell);
+            var bombObj = Instantiate(bombPrefab, worldPos, Quaternion.identity);
 
-            // 🔥 SİHİRLİ DOKUNUŞ: Bombayı ağ üzerinde herkes için oluşturur!
+            // Network Spawn
             var netObj = bombObj.GetComponent<NetworkObject>();
-            if (netObj != null)
-            {
-                netObj.Spawn();
-            }
+            if (netObj != null) netObj.Spawn();
 
             var bomb = bombObj.GetComponent<BombController>();
             if (bomb == null)
             {
-                bombObj.GetComponent<NetworkObject>().Despawn(); // Hata varsa ağdan da sil
+                if (netObj != null && netObj.IsSpawned) netObj.Despawn(true);
+                else Destroy(bombObj);
                 return false;
             }
 
@@ -106,15 +109,7 @@ namespace DPBomberman.Controllers
             myBombs.Add(bomb);
             bomb.Arm(cell);
 
-            StartCoroutine(RemoveAfterFuse(bomb, fuseSeconds + 0.25f));
-
             return true;
-        }
-
-        private System.Collections.IEnumerator RemoveAfterFuse(BombController bomb, float seconds)
-        {
-            yield return new WaitForSeconds(seconds);
-            if (bomb != null) myBombs.Remove(bomb);
         }
     }
 }

@@ -1,11 +1,11 @@
-using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Tilemaps;
+using Unity.Netcode;
 
 namespace DPBomberman.Controllers
 {
-    public class BombController : MonoBehaviour
+    public class BombController : NetworkBehaviour
     {
         [Header("Bomb Settings")]
         public float fuseSeconds = 2.0f;
@@ -15,9 +15,6 @@ namespace DPBomberman.Controllers
         public Tilemap groundTilemap;
         public TilemapDamageSystem damageSystem;
         public MapLogicAdapter mapLogicAdapter;
-        public System.Action OnExploded;
-        
-
 
         private Vector3Int originCell;
 
@@ -25,10 +22,16 @@ namespace DPBomberman.Controllers
         {
             originCell = cell;
 
+            // pozisyonu cell center'a koy (server koyacak, herkes görecek)
             if (groundTilemap != null)
                 transform.position = groundTilemap.GetCellCenterWorld(cell);
 
-            StartCoroutine(FuseRoutine());
+            // Bomba hücresi artýk blok
+            BombRegistry.Register(originCell);
+
+            // Fuse sadece server'da çalýþacak
+            if (IsServer)
+                StartCoroutine(FuseRoutine());
         }
 
         private IEnumerator FuseRoutine()
@@ -38,13 +41,32 @@ namespace DPBomberman.Controllers
             if (damageSystem == null)
             {
                 Debug.LogError("[BombController] damageSystem is NULL.");
-                Destroy(gameObject);
+                SafeDespawn();
                 yield break;
             }
 
+            // Explosion sadece server mantýðý
             damageSystem.Explode(originCell, range, mapLogicAdapter);
 
-            Destroy(gameObject);
+            SafeDespawn();
+        }
+
+        private void SafeDespawn()
+        {
+            BombRegistry.Unregister(originCell);
+
+            var netObj = GetComponent<NetworkObject>();
+            if (netObj != null && netObj.IsSpawned)
+                netObj.Despawn(true);
+            else
+                Destroy(gameObject);
+        }
+
+        public override void OnNetworkDespawn()
+        {
+            // Güvenlik: her koþulda unregister
+            BombRegistry.Unregister(originCell);
+            base.OnNetworkDespawn();
         }
     }
 }

@@ -1,228 +1,273 @@
 ﻿using System.Collections.Generic;
+using System.Reflection;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 using DPBomberman.Models.Map;
-using DPBomberman.Patterns.Factory;
-using Patterns.Decorator;
 
 namespace DPBomberman.Controllers
 {
     public class TilemapDamageSystem : MonoBehaviour
     {
-        [Header("Tilemaps")]
+        [Header("Tilemaps (Assign or Auto-Find)")]
         public Tilemap groundTilemap;
-        public Tilemap solidTilemap;
-        public Tilemap breakableTilemap;
-        public Tilemap hardTilemap;
+        public Tilemap solidTilemap;      // Unbreakable
+        public Tilemap breakableTilemap;  // Breakable
+        public Tilemap hardTilemap;       // Hard (multi-hit)
 
-        [Header("Hard Wall Settings")]
-        [Min(1)] public int hardWallHp = 3;
+        [Header("Explosion")]
+        [Tooltip("Explosion tehlike süresi (ExplosionAreaTracker buna göre işaretleyebilir).")]
+        public float dangerDuration = 0.35f;
 
-        [Header("Explosion Tracking")]
+        [Tooltip("Hard tile kaç patlamada kırılır?")]
+        public int hardHitsToBreak = 2;
+
+        [Header("Refs (optional)")]
         public ExplosionAreaTracker explosionTracker;
 
-        [Header("PowerUp Drop Chances")]
-        // İsteğin üzerine oranları güncelledim
-        [Range(0f, 1f)] public float breakableDropChance = 0.40f; // %40
-        [Range(0f, 1f)] public float hardDropChance = 0.60f;      // %60
+        // Hard tile hasar takibi
+        private readonly Dictionary<Vector3Int, int> hardHits = new();
 
-        [Header("PowerUp Prefabs (MUTLAKA ATANMALI)")]
-        public GameObject bombPowerPowerUpPrefab; // En çok çıkmasını istediğin (Bomba Gücü)
-        public GameObject bombCountPowerUpPrefab; // Ekstra Bomba
-        public GameObject speedPowerUpPrefab;     // Hız
-
-        private TileWallFactory factory;
-        private readonly Dictionary<Vector3Int, int> hardHp = new();
-        private bool warnedMissingPowerUpPrefabs;
+        private bool IsServerNow
+            => NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening && NetworkManager.Singleton.IsServer;
 
         private void Awake()
         {
-            AutoAssignTilemaps();
-            RebuildFactoryIfNeeded();
+            AutoAssignRefs();
         }
 
-        private void OnValidate()
+        private void OnEnable()
         {
-            if (hardWallHp < 1) hardWallHp = 1;
-            breakableDropChance = Mathf.Clamp01(breakableDropChance);
-            hardDropChance = Mathf.Clamp01(hardDropChance);
+            AutoAssignRefs();
+        }
+
+        private void AutoAssignRefs()
+        {
+            AutoAssignTilemaps();
+
+            if (explosionTracker == null)
+                explosionTracker = Object.FindFirstObjectByType<ExplosionAreaTracker>();
         }
 
         private void AutoAssignTilemaps()
         {
-            if (groundTilemap == null) groundTilemap = GameObject.Find("Ground")?.GetComponent<Tilemap>();
-            if (solidTilemap == null) solidTilemap = GameObject.Find("Walls_Solid")?.GetComponent<Tilemap>();
-            if (breakableTilemap == null) breakableTilemap = GameObject.Find("Walls_Breakable")?.GetComponent<Tilemap>();
-            if (hardTilemap == null) hardTilemap = GameObject.Find("Walls_Hard")?.GetComponent<Tilemap>();
+            // ✅ senin istediğin: TilemapFinder ile güncel bağlama
+            if (groundTilemap == null) groundTilemap = TilemapFinder.Find("Ground");
+            if (solidTilemap == null) solidTilemap = TilemapFinder.Find("Walls_Solid");
+            if (breakableTilemap == null) breakableTilemap = TilemapFinder.Find("Walls_Breakable");
+            if (hardTilemap == null) hardTilemap = TilemapFinder.Find("Walls_Hard");
         }
 
-        private void RebuildFactoryIfNeeded()
+        /// <summary>
+        /// Bombanın patlamasını uygular: tile kırma + tehlike alanı + server kill.
+        /// </summary>
+        public void Explode(Vector3Int origin, int range, MapLogicAdapter mapLogicAdapter = null)
         {
-            if (factory == null && solidTilemap != null)
-                factory = new TileWallFactory(solidTilemap, breakableTilemap, hardTilemap);
-        }
+            AutoAssignRefs();
 
-        public void Explode(Vector3Int origin, int range, MapLogicAdapter logicAdapter)
-        {
-            if (range < 1) range = 1;
-            AutoAssignTilemaps();
-            RebuildFactoryIfNeeded();
+            if (groundTilemap == null)
+            {
+                Debug.LogError("[TilemapDamageSystem] groundTilemap NULL. Explosion cancelled.");
+                return;
+            }
 
-            if (groundTilemap == null || factory == null) return;
+            range = Mathf.Max(1, range);
 
-            // Patlama görseli ve mantığı
+            // Patlama hücreleri
             var cells = new List<Vector3Int> { origin };
-            CollectRay(origin, Vector3Int.right, range, cells);
-            CollectRay(origin, Vector3Int.left, range, cells);
-            CollectRay(origin, Vector3Int.up, range, cells);
-            CollectRay(origin, Vector3Int.down, range, cells);
 
-            explosionTracker?.ActivateCells(cells);
+            // 4 yöne ışın (Bomberman)
+            CollectRay(cells, origin, Vector3Int.right, range);
+            CollectRay(cells, origin, Vector3Int.left, range);
+            CollectRay(cells, origin, Vector3Int.up, range);
+            CollectRay(cells, origin, Vector3Int.down, range);
 
-            // Hasar verme işlemi
-            ApplyExplosionToCell(origin, logicAdapter);
-            Propagate(origin, Vector3Int.right, range, logicAdapter);
-            Propagate(origin, Vector3Int.left, range, logicAdapter);
-            Propagate(origin, Vector3Int.up, range, logicAdapter);
-            Propagate(origin, Vector3Int.down, range, logicAdapter);
-        }
-
-        private void Propagate(Vector3Int origin, Vector3Int dir, int range, MapLogicAdapter logicAdapter)
-        {
-            for (int step = 1; step <= range; step++)
+            // Önce kırma uygulansın (server tarafı mantıklı)
+            if (IsServerNow)
             {
-                Vector3Int cell = origin + dir * step;
-                if (groundTilemap != null && !groundTilemap.HasTile(cell)) break;
-                if (ApplyExplosionToCell(cell, logicAdapter)) break;
+                ApplyTileDamage(cells, mapLogicAdapter);
+                KillPlayersInCells(cells);
             }
+
+            // Tehlike alanı işaretle (client’larda da görsel/kill check için)
+            ActivateDangerCellsSafe(cells, dangerDuration);
         }
 
-        private void CollectRay(Vector3Int origin, Vector3Int dir, int range, List<Vector3Int> cells)
+        // --------------------------------------------------------------------
+        // RAY COLLECT
+        // --------------------------------------------------------------------
+        private void CollectRay(List<Vector3Int> cells, Vector3Int origin, Vector3Int dir, int range)
         {
-            for (int step = 1; step <= range; step++)
+            for (int i = 1; i <= range; i++)
             {
-                Vector3Int cell = origin + dir * step;
-                if (groundTilemap != null && !groundTilemap.HasTile(cell)) break;
+                Vector3Int c = origin + dir * i;
 
-                cells.Add(cell);
+                // ground yoksa harita dışı say
+                if (groundTilemap != null && !groundTilemap.HasTile(c)) break;
 
-                CellType type = factory.GetCellType(cell);
-                if (type == CellType.Unbreakable || type == CellType.Breakable || type == CellType.Hard)
+                // Unbreakable duvar patlamayı keser
+                if (solidTilemap != null && solidTilemap.HasTile(c))
                     break;
+
+                // Bu hücre patlama alanına girer
+                cells.Add(c);
+
+                // Breakable / Hard patlamayı durdurur (Bomberman kuralı)
+                if (hardTilemap != null && hardTilemap.HasTile(c)) break;
+                if (breakableTilemap != null && breakableTilemap.HasTile(c)) break;
             }
         }
 
-        private bool ApplyExplosionToCell(Vector3Int cell, MapLogicAdapter logicAdapter)
+        // --------------------------------------------------------------------
+        // TILE DAMAGE
+        // --------------------------------------------------------------------
+        private void ApplyTileDamage(List<Vector3Int> cells, MapLogicAdapter mapLogicAdapter)
         {
-            if (factory == null) return false;
-            CellType type = factory.GetCellType(cell);
+            if (breakableTilemap == null && hardTilemap == null) return;
 
-            if (type == CellType.Unbreakable) return true;
+            MapGrid grid = null;
+            if (mapLogicAdapter != null)
+                grid = mapLogicAdapter.GetMapGrid();
 
-            // BREAKABLE DUVAR
-            if (type == CellType.Breakable)
+            foreach (var c in cells)
             {
-                if (breakableTilemap != null) breakableTilemap.SetTile(cell, null);
-                logicAdapter?.GetMapGrid()?.SetCell(cell.x, cell.y, CellType.Ground);
+                // Solid hiçbir zaman kırılmasın
+                if (solidTilemap != null && solidTilemap.HasTile(c))
+                    continue;
 
-                // %40 ihtimalle düşür
-                TrySpawnPowerUp(cell, breakableDropChance);
-                return true;
+                // Hard varsa önce onu işle
+                if (hardTilemap != null && hardTilemap.HasTile(c))
+                {
+                    int hit = 0;
+                    hardHits.TryGetValue(c, out hit);
+                    hit++;
+                    hardHits[c] = hit;
+
+                    if (hit >= Mathf.Max(1, hardHitsToBreak))
+                    {
+                        hardTilemap.SetTile(c, null);
+                        hardHits.Remove(c);
+
+                        // Logic update
+                        if (grid != null)
+                            grid.SetCell(c.x, c.y, CellType.Ground);
+                    }
+
+                    // Hard, ray’i kesen engel olduğu için burada bitiriyoruz
+                    continue;
+                }
+
+                // Breakable kır
+                if (breakableTilemap != null && breakableTilemap.HasTile(c))
+                {
+                    breakableTilemap.SetTile(c, null);
+
+                    // Logic update
+                    if (grid != null)
+                        grid.SetCell(c.x, c.y, CellType.Ground);
+
+                    continue;
+                }
+            }
+        }
+
+        // --------------------------------------------------------------------
+        // SERVER KILL
+        // --------------------------------------------------------------------
+        private void KillPlayersInCells(List<Vector3Int> cells)
+        {
+            if (!IsServerNow) return;
+            if (groundTilemap == null) return;
+
+            var players = Object.FindObjectsByType<DPBomberman.Controllers.PlayerController>(FindObjectsSortMode.None);
+
+            foreach (var p in players)
+            {
+                if (p == null) continue;
+
+                Vector3Int pCell = groundTilemap.WorldToCell(p.transform.position);
+
+                if (!cells.Contains(pCell)) continue;
+
+                // Öncelik: PlayerController.KillClientRpc varsa onu çağır
+                if (!TryInvokeMethod(p, "KillClientRpc"))
+                {
+                    // Fallback: DamageableActor varsa Kill
+                    var actor = p.GetComponent<DamageableActor>();
+                    if (actor != null)
+                    {
+                        actor.Kill();
+                        continue;
+                    }
+
+                    // Fallback: PlayerCollisionKill varsa Die
+                    var kill = p.GetComponent<PlayerCollisionKill>();
+                    if (kill != null)
+                    {
+                        kill.Die("Explosion");
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // --------------------------------------------------------------------
+        // DANGER TRACKER SAFE CALL (signature farklarına dayanıklı)
+        // --------------------------------------------------------------------
+        private void ActivateDangerCellsSafe(List<Vector3Int> cells, float duration)
+        {
+            if (explosionTracker == null) return;
+
+            // Bazı projelerde: ActivateCells(List<Vector3Int>)
+            // Bazılarında: ActivateCells(List<Vector3Int>, float)
+            // Reflection ile ikisine de uyumlu çalıştırıyoruz.
+            var t = explosionTracker.GetType();
+
+            // 2 parametreli dene
+            var m2 = t.GetMethod("ActivateCells",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(List<Vector3Int>), typeof(float) },
+                null);
+
+            if (m2 != null)
+            {
+                m2.Invoke(explosionTracker, new object[] { cells, duration });
+                return;
             }
 
-            // HARD DUVAR
-            if (type == CellType.Hard)
-            {
-                int hpLeft = ApplyHardDamage(cell);
-                if (hpLeft <= 0)
-                {
-                    if (hardTilemap != null) hardTilemap.SetTile(cell, null);
-                    logicAdapter?.GetMapGrid()?.SetCell(cell.x, cell.y, CellType.Ground);
+            // 1 parametreli dene
+            var m1 = t.GetMethod("ActivateCells",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(List<Vector3Int>) },
+                null);
 
-                    // %60 ihtimalle düşür
-                    TrySpawnPowerUp(cell, hardDropChance);
-                }
+            if (m1 != null)
+            {
+                m1.Invoke(explosionTracker, new object[] { cells });
+                return;
+            }
+
+            Debug.LogWarning("[TilemapDamageSystem] ExplosionAreaTracker.ActivateCells method not found (signature mismatch).");
+        }
+
+        private static bool TryInvokeMethod(object target, string methodName)
+        {
+            if (target == null) return false;
+
+            var m = target.GetType().GetMethod(methodName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            if (m == null) return false;
+
+            if (m.GetParameters().Length == 0)
+            {
+                m.Invoke(target, null);
                 return true;
             }
 
             return false;
-        }
-
-        // ==========================================
-        // DÜZELTİLEN KISIM BURASI
-        // ==========================================
-        private void TrySpawnPowerUp(Vector3Int cell, float dropChance)
-        {
-            if (groundTilemap == null) return;
-
-            // O karede zaten bir power-up varsa işlem yapma
-            if (PowerUpRegistry.Has(cell)) return;
-
-            // 1. ADIM: Power-up düşecek mi? (Duvarın kendi şansı %40 veya %60)
-            // Eğer zar, şanstan büyük gelirse power-up düşmez, fonksiyon biter.
-            if (Random.value > dropChance) return;
-
-
-            // 2. ADIM: Hangisi düşecek? (HEPSİ EŞİT İHTİMAL)
-            // 3 çeşit power-up var. Unity 0, 1 veya 2 sayısını tutacak.
-            int roll = Random.Range(0, 3);
-
-            GameObject prefabToSpawn = null;
-
-            if (roll == 0)
-            {
-                prefabToSpawn = bombPowerPowerUpPrefab;
-            }
-            else if (roll == 1)
-            {
-                prefabToSpawn = bombCountPowerUpPrefab;
-            }
-            else // roll == 2
-            {
-                prefabToSpawn = speedPowerUpPrefab;
-            }
-
-
-            // Eğer inspector'da prefabı boş bıraktıysan hata vermesin diye kontrol
-            if (prefabToSpawn == null)
-            {
-                if (!warnedMissingPowerUpPrefabs)
-                {
-                    Debug.LogWarning("TilemapDamageSystem: PowerUp Prefabları eksik! PowerUp düşüremiyorum.");
-                    warnedMissingPowerUpPrefabs = true;
-                }
-                return;
-            }
-
-            // Power-up'ı yarat
-            Vector3 worldPos = groundTilemap.GetCellCenterWorld(cell);
-            GameObject obj = Instantiate(prefabToSpawn, worldPos, Quaternion.identity);
-
-            // Sisteme kaydet (Registry ve Pickup)
-            if (!PowerUpRegistry.Register(cell, obj))
-            {
-                Destroy(obj); // Kayıt başarısızsa (üst üste bindiyse) sil
-                return;
-            }
-
-            var pickup = obj.GetComponent<PowerUpPickup>();
-            if (pickup != null)
-            {
-                pickup.RegisterCell(cell);
-            }
-        }
-
-        private int ApplyHardDamage(Vector3Int cell)
-        {
-            if (!hardHp.TryGetValue(cell, out int hp)) hp = hardWallHp;
-            hp -= 1;
-            if (hp <= 0)
-            {
-                hardHp.Remove(cell);
-                return 0;
-            }
-            hardHp[cell] = hp;
-            return hp;
         }
     }
 }

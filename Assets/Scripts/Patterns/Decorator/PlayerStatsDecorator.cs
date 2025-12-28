@@ -1,5 +1,6 @@
 namespace Patterns.Decorator
 {
+    // Decorator base class: default olarak inner statlarý aynen geçirir.
     public abstract class PlayerStatsDecorator : IPlayerStats
     {
         protected readonly IPlayerStats inner;
@@ -10,7 +11,7 @@ namespace Patterns.Decorator
         }
 
         public virtual float Speed => inner.Speed;
-        public virtual int BombPower => inner.BombPower;
         public virtual int BombCount => inner.BombCount;
+        public virtual int BombPower => inner.BombPower;
     }
 }
